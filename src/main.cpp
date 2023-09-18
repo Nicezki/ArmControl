@@ -8,18 +8,13 @@
 String intToString(int number);
 
 void servoControl(int ServoNo, int degree);
-void serialMorniHandle();
-void resetServo();
-void smoothServoControl(int ServoNo, int degree, int interpolate, unsigned long delayTime);
+void smoothServoControl(int ServoNo, int degree);
 void grip(bool stage);
 void toggleGrip();
 void setServo(int ServoNo, int degree, bool slient);
 void InstructionHandle(String instruction);
 void Instruction(String instructions);
-void recordStep();
-void resetStep();
 void conveyor(int num, int way);
-void piSerialMonitorHandle();
 void piSerialMonitorStatus();
 void piSerialDirect();
 void busy(bool state);
@@ -40,7 +35,8 @@ int sLastAngle[] = {0, 0, 0, 0, 0, 0};
 int Conveyor[] = {0, 0};
 String sInstruction = "";
 bool isBusy = false;
-int timePerStep
+int timePerMove = 40;
+int stepPerMove = 1;
 
 int servoNumber = 0, servoAngle = 90, mode = 0;
 unsigned long previousMillis = 0;
@@ -61,35 +57,12 @@ void setup() {
 }
 
 void loop() {
-  // serialMorniHandle();
-  // piSerialMonitorHandle();
   piSerialDirect();
     if (isPausing && millis() - previousMillis >= pauseDuration) {
     isPausing = false;
   }
 }
 
-void piSerialMonitorHandle() {
-  // If serial is available, read input
-  //If input start with PI, it will be parsed as instruction
-  if (Serial.available() > 0) {
-    String input = Serial.readStringUntil('\n'); // Read input from serial
-    if (input.startsWith("PB")){
-      if(isBusy == false){
-        Serial.println("POK");
-      }else{
-        Serial.println("PB");
-      }
-    }
-    if (input.startsWith("PI")) {
-      String instruction = input.substring(2);
-      Instruction(instruction);
-    }
-    else {
-      Serial.println("[PI] Invalid instruction " + input);
-    }
-  }
-}
 
 // Direct instruction will be in this format
 //PW000S00D000S01D025S02D000S03D000S04D090S05D040C00C10
@@ -122,6 +95,25 @@ void piSerialDirect() {
       busy(true);
       Instruction(input.substring(2));
       busy(false);;
+      return;
+    }
+    // PT000M000 (T = TimePerMove, M = StepPerMove)
+    if(input.startsWith("PT")){
+      // If no timePerMove and stepPerMove is specified, it will return the current value in the format PT000M000
+      if(input.length() == 2){
+        Serial.print("PT");
+        Serial.print(intToString(timePerMove));
+        Serial.print("M");
+        Serial.println(intToString(stepPerMove));
+      }
+      else{
+        timePerMove = input.substring(2, 5).toInt();
+        stepPerMove = input.substring(6, 9).toInt();
+        Serial.print("PT");
+        Serial.print(intToString(timePerMove));
+        Serial.print("M");
+        Serial.println(intToString(stepPerMove));
+      }
       return;
     }
     // Check if the input data length is valid
@@ -165,7 +157,7 @@ void piSerialDirect() {
         servoPositions[i] = servoData[i].toInt();
         Serial.println("[Direct] Servo " + String(i) + " at " + servoData[i]);
         if (useSmoothServo) {
-          smoothServoControl(i, servoPositions[i], 1, 25);
+          smoothServoControl(i, servoPositions[i]);
         }
         else {
           servoControl(i, servoPositions[i]);
@@ -212,105 +204,6 @@ void piSerialMonitorStatus(){
   Serial.println(result);
 }
 
-
-
-// DEPRECATED from Version 1
-// void serialMorniHandle() {
-//   if (Serial.available() > 0) {
-//     String input = Serial.readStringUntil('\n'); // Read input from serial
-    
-//     if (input.startsWith("S")) {
-//       mode = 0; // Set mode to select servo
-//       Serial.println("Selecting Servo, Type your servo number (0-5)");
-//     }
-//     else if (input.startsWith("D")) {
-//       mode = 1; // Set mode to set angle
-//       Serial.print("Selecting Degree, Enter your degree for servo ");
-//       Serial.println(servoNumber);
-//     }
-//     else if (input.startsWith("F")) {
-//       mode = 2; // Set mode to set angle
-//       Serial.print("[Force] Selecting Degree, Enter your degree for servo ");
-//       Serial.println(servoNumber);
-//     }    
-//     else if (input.startsWith("G")) {
-//       // Switch Grip State
-//       // [Toggle Grip] Now: GRIP
-
-//       Serial.println("[Toggle Grip] Now: ");
-//       toggleGrip();
-//     }
-//     else if (input.startsWith("A")) {
-//       // Get servo angle
-//       Serial.print("Servo ");
-//       Serial.print(servoNumber);
-//       Serial.print(" | Angle: ");
-//       Serial.println(servoAngle);
-//     }
-//     else if (input.startsWith("R")) {
-//       // Get servo angle
-//       Serial.println("Reset All Servo ");
-//       resetServo();
-
-//     }else if (input.startsWith("X")){
-//       // Record Step
-//       recordStep();
-//     }else if (input.startsWith("Y")){
-//       // Reset Step
-//       resetStep();
-//     }else if (input.startsWith("[")){
-//       //Minus current servo angle by 1
-//       servoAngle = sAngle[servoNumber] - 1;
-//       Serial.println("[-] Servo" + String(servoNumber) + " at: " + String(sAngle[servoNumber]));
-//       smoothServoControl(servoNumber, servoAngle, 1, 25);
-
-//     }else if (input.startsWith("]")){
-//       //Plus current servo angle by 1
-//       servoAngle = sAngle[servoNumber] + 1;
-//       Serial.println("[+] Servo" + String(servoNumber) + " at: " + String(sAngle[servoNumber]));
-//       smoothServoControl(servoNumber, servoAngle, 1, 25);
-//     }else if (input.startsWith("O")){
-//       //Plus current servo angle by 1
-//       servoAngle = sAngle[servoNumber] + 10;
-//       Serial.println("[+] Servo" + String(servoNumber) + " at: " + String(sAngle[servoNumber]));
-//       smoothServoControl(servoNumber, servoAngle, 1, 25);
-//     }else if (input.startsWith("P")){
-//       //Plus current servo angle by 1
-//       servoAngle = sAngle[servoNumber] - 10;
-//       Serial.println("[+] Servo" + String(servoNumber) + " at: " + String(sAngle[servoNumber]));
-//       smoothServoControl(servoNumber, servoAngle, 1, 25);
-//     }else {
-//       // Parse input
-//       int value = input.toInt();
-//       if (mode == 0) {
-//         // Set servo number
-//         servoNumber = value;
-//         Serial.print("[Select] Now controlling servo ");
-//         Serial.println(servoNumber);
-//       }
-//       else if (mode == 1) {
-//         // Set servo angle
-//         servoAngle = value;
-//         Serial.print("[Set] Servo ");
-//         Serial.print(servoNumber);
-//         Serial.print(" is now set to ");
-//         Serial.println(servoAngle);
-//         smoothServoControl(servoNumber, servoAngle, 1, 25);
-        
-//       }
-//       else if (mode == 2) {
-//         // Set servo angle
-//         servoAngle = value;
-//         Serial.print("[Force] Servo ");
-//         Serial.print(servoNumber);
-//         Serial.print(" is now set to ");
-//         Serial.println(servoAngle);
-//         servoControl(servoNumber, servoAngle);
-//       }
-//     }
-//   }
-// }
-
 void busy(bool state){
   if (state == true){
     isBusy = true;
@@ -321,8 +214,6 @@ void busy(bool state){
     Serial.println("POK");
   }
 }
-
-
 
 void servoControl(int ServoNo, int degree){
   if (degree > 180){
@@ -341,7 +232,7 @@ void servoControl(int ServoNo, int degree){
 }
 
 
-void smoothServoControl(int ServoNo, int targetDegree, int step = 3, unsigned long delayTime = 40) {
+void smoothServoControl(int ServoNo, int targetDegree) {
   // int currentDegree = servo[ServoNo].read();
   int currentDegree = sAngle[ServoNo]; // New function to get servo angle
 
@@ -349,11 +240,8 @@ void smoothServoControl(int ServoNo, int targetDegree, int step = 3, unsigned lo
     targetDegree = 180;
   }
 
-  if (targetDegree > 110 && ServoNo == 3) {
-    targetDegree = 110;
-  }
-
   if (currentDegree == targetDegree) {
+    setServo(ServoNo, currentDegree, true);
     return;  // No need to move if already at the target degree
   }
 
@@ -362,8 +250,8 @@ void smoothServoControl(int ServoNo, int targetDegree, int step = 3, unsigned lo
   // Serial.print(ServoNo);
   // Serial.print(" at: ");
   while (currentDegree != targetDegree) {
-    if (millis() - previousMillis >= delayTime) {
-      currentDegree += step * direction;
+    if (millis() - previousMillis >= timePerMove) {
+      currentDegree += stepPerMove * direction;
       
       if ((direction == 1 && currentDegree > targetDegree) || (direction == -1 && currentDegree < targetDegree)) {
         currentDegree = targetDegree;
@@ -488,16 +376,7 @@ void InstructionHandle(String instruction) {
     grip(false);
     Serial.println("[Instruction] Open");
   }
-  else if (instruction.startsWith("R")) {
-    resetServo();
-  }
   else if (instruction.startsWith("COV")){
-    // Format COV<NUM><WAY>
-    // NUM = 0 to 1 (0 = Short, 1 = Long)
-    // WAY = 0 or 1 or 2
-    // 0 = Stop
-    // 1 = Forward
-    // 2 = Backward
     int num = instruction.substring(3, 4).toInt();
     int way = instruction.substring(4, 5).toInt();
 
@@ -565,77 +444,6 @@ void Instruction(String instructions) {
   }
 }
 
-// //Handle Array of Instruction
-// void Instruction(String instruction[]){
-//   for (int i = 0; i < sizeof(instruction); i++){
-//     InstructionHandle(instruction[i]);
-//   }
-// }
-
-
-
-
-
-//OBSOLETE from Version 1
-// void showCurrentPos(){
-// // This will return current Pos of Servo 0 to 5 in this format
-// //S00D000 S01D025 S02D000 ...
-// //S<servoNo>D<degree>
-//   String result = "";
-//   for (int i = 0; i < 6; i++){
-//     result += "S0" + String(i) + "D" + intToString(sAngle[i]) + " ";
-//   }
-//   Serial.println(result);
-// }
-
-
-
-//OBSOLETE from version 1
-//This will compare current pos of servo with last step (sLastAngle)
-//If it's different, it will record the step output like this
-//If only one servo is different output will be like this
-//S01D025
-//If more than one servo is different output will be like this
-//S01D025>S02D000>S03D090 (This mean servo 1, 2, 3 is different from last step)
-// void recordStep(){
-//   Serial.println("[Recording Step]");
-//   String result = "";
-//   for (int i = 0; i < 6; i++){
-//     if (sAngle[i] != sLastAngle[i]){
-//       result += "S0" + String(i) + "D" + intToString(sAngle[i]) + ">";
-//     }
-//   }
-//   if (result != ""){
-//     result = result.substring(0, result.length() - 1);
-//     Serial.println(result);
-//   }
-//   for (int i = 0; i < 6; i++){
-//     sLastAngle[i] = sAngle[i];
-//   }
-
-//   if (sInstruction = ""){
-//     //Add all servo movement to sInstruction from S00 to S05
-//     sInstruction += "S00D"+ intToString(sAngle[0]) + ">S01D"+ intToString(sAngle[1]) + ">S02D"+ intToString(sAngle[2]) + ">S03D"+ intToString(sAngle[3]) + ">S04D"+ intToString(sAngle[4]) + ">S05D"+ intToString(sAngle[5]) + ">";
-//     Serial.println("[First Recorded: " + sInstruction + "]");
-//   }else{
-//     //Add only servo movement that is different from last step
-//     if (result != ""){
-//       Serial.println("[Recorded: " + result + "]");
-//       Serial.println("[All step: " + sInstruction + "]");
-//       sInstruction += ">" + result;
-//     }else{
-//       Serial.println("[No change]");
-//     }
-//   }
-//   }
-
-
-//OBSOLETE from version 1
-// void resetStep(){
-//   sInstruction = "";
-//   Serial.println("[Reset Step]");
-// }
-
 
 //Convert int to String with 3 digits
 String intToString(int number){
@@ -652,20 +460,3 @@ String intToString(int number){
   return result;
 }
 
-//การเขียนคำสั่งแบบใหม่
-// แต่ละคำสั่งคั่นด้วย > เช่น S01D090>S02D180 (ไม่มีเว้นวรรค)
-// บังคับองศา Servo แบบราบรื่นทีละนิด ใช้ S<เลข Servo เช่น 01> D<องศา เช่น 090 เช่น S01D090
-// บังคับองศา Servo แบบทันที ใช้ F<เลข Servo เช่น 01> D<องศา เช่น 090 เช่น F01D090
-// หยุดชั่วคราวแบบกำหนดเวลา P<เวลา> เช่น 500 เช่น P00500 (หน่วงเวลา 500 มิลลิวินาที)
-// เปิดปิด Gripper ใช้ G
-// หยิบของใช้ GRIP
-// ปล่อยของใช้ OPEN
-// บังคับสายพานโดยคำสั่ง COV<เลขสายพาน เช่น 0 หรือ 1><ทิศทาง เช่น 0 หรือ 1 หรือ 2> เช่น COV00 (หยุด) COV01 (เดินไปข้างหน้า) COV02 (ถอยหลัง)
-// รีเซ็ต Servo ไปตำแหน่งเริ่มใช้ R (ห้ามใช้ในฟังก์ชั่น resetServo เพราะจะเกิด Loop)
-// จบคำสั่งใช้ END
-
-
-// OBSOLETE from version 1
-// void resetServo(){
-//   Instruction("COV01>COV11>S00D080>S01D075>S02D080>S03D075>S04D000>S05D040>DPS001>END");
-// }
