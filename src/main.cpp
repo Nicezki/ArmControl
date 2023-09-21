@@ -14,7 +14,7 @@ void toggleGrip();
 void setServo(int ServoNo, int degree, bool slient);
 void InstructionHandle(String instruction);
 void Instruction(String instructions);
-void conveyor(int num, int way);
+void conveyor(int num, int way, int speed);
 void piSerialMonitorStatus();
 void piSerialDirect();
 void busy(bool state);
@@ -29,13 +29,17 @@ unsigned long currentMillis = millis();
 #define CONV_SB 4
 #define CONV_LA 5
 #define CONV_LB 6
+#define CONV_SS 9 //Pwm
+#define CONV_LS 10 //Pwm
+
 
 int sAngle[] = {0, 0, 0, 0, 0, 0};
 int sLastAngle[] = {0, 0, 0, 0, 0, 0};
 int Conveyor[] = {0, 0};
+int ConveyorSpeed[] = {0, 0};
 String sInstruction = "";
 bool isBusy = false;
-int timePerMove = 40;
+unsigned long timePerMove = 40;
 int stepPerMove = 1;
 
 int servoNumber = 0, servoAngle = 90, mode = 0;
@@ -54,21 +58,27 @@ void setup() {
   pwm.setPWMFreq(50);  // Set the PWM frequency to 50 Hz (typical for servos)
   Serial.begin(115200); // Start serial communication at 115200 bps
   Serial.println("Ready!");
+  pinMode(CONV_SA, OUTPUT);
+  pinMode(CONV_SB, OUTPUT);
+  pinMode(CONV_LA, OUTPUT);
+  pinMode(CONV_LB, OUTPUT);
+  pinMode(CONV_SS, OUTPUT);
+  pinMode(CONV_LS, OUTPUT);
 }
 
 void loop() {
   piSerialDirect();
-    if (isPausing && millis() - previousMillis >= pauseDuration) {
+  if (isPausing && millis() - previousMillis >= pauseDuration) {
     isPausing = false;
   }
 }
 
 
 // Direct instruction will be in this format
-//PW000S00D000S01D025S02D000S03D000S04D090S05D040C00C10
+//PW000S00D000S01D025S02D000S03D000S04D090S05D040C0M0S000C1M0S000
 //PWXXX = Current step of work that is being doing (For now it will be 000)
 //S00DXXXS01DXXXS02DXXXS03DXXXS04DXXXS05DXXX = Current servo position
-//C0XC1X = Current conveyor position (0 = Stop, 1 = Forward, 2 = Backward)
+//C0MXSYYYC1MXSYYY = Current conveyor position (Mode X: 0 = Stop, 1 = Forward, 2 = Backward | Speed YYY: Speed of conveyor belt)
 
 void piSerialDirect() {
   if (Serial.available() > 0) {
@@ -140,7 +150,7 @@ void piSerialDirect() {
       }
       
       // Extract servo positions
-      //Ex: PS00D045S01D120S02D090S03D035S04D060S05D180C00C11
+      //Ex: PS00D045S01D120S02D090S03D035S04D060S05D180C0M0S000C1M1S000
       String servoData[6];
       servoData[0] = input.substring(5, 8); //S00DXXX
       servoData[1] = input.substring(11, 15); //S01DXXX
@@ -166,19 +176,31 @@ void piSerialDirect() {
       
       // Extract conveyor positions
       String conveyorData[2];
-      conveyorData[0] = input.substring(43, 45);
-      conveyorData[1] = input.substring(46, 48);
-      
+      String conveyorMode[2];
+      String conveyorSpeed[2];
+      conveyorData[0] = input.substring(43, 51); //C0M0S000
+      conveyorData[1] = input.substring(51, 59); //C1M1S000
+      Serial.println("[Debug] Conveyor 0: " + conveyorData[0]);
+      Serial.println("[Debug] Conveyor 1: " + conveyorData[1]);
+
+      conveyorMode[0] = conveyorData[0].substring(1, 2); //M0
+      conveyorMode[1] = conveyorData[1].substring(1, 2); //M1
+      conveyorSpeed[0] = conveyorData[0].substring(5, 8); //S000
+      conveyorSpeed[1] = conveyorData[1].substring(5, 8); //S000
+      Serial.println("[Debug] Conveyor 0 Mode: " + conveyorMode[0]);
+      Serial.println("[Debug] Conveyor 1 Mode: " + conveyorMode[1]);
+      Serial.println("[Debug] Conveyor 0 Speed: " + conveyorSpeed[0]);
+      Serial.println("[Debug] Conveyor 1 Speed: " + conveyorSpeed[1]);
+
+
       for (int i = 0; i < 2; i++) {
-        conveyorData[i].trim(); // Remove leading/trailing spaces
-        if (conveyorData[i].startsWith("C")) {
-          conveyorData[i] = conveyorData[i].substring(1); // Skip the 'C' character
-        }
-        conveyorPositions[i] = conveyorData[i].toInt();
-        Serial.println("[Direct] Conveyor " + String(i) + " at " + conveyorData[i]);
-        conveyor(i, conveyorPositions[i]);
+        conveyorMode[i].trim(); // Remove leading/trailing spaces
+        conveyorSpeed[i].trim(); // Remove leading/trailing spaces
+        conveyorPositions[i] = conveyorMode[i].toInt();
+        ConveyorSpeed[i] = conveyorSpeed[i].toInt();
+        Serial.println("[Direct] Conveyor " + String(i) + " at " + conveyorMode[i] + " with speed " + conveyorSpeed[i]);
+        conveyor(i, conveyorPositions[i], ConveyorSpeed[i]);
       }
-      
       busy(false);
       piSerialMonitorStatus();
     } else {
@@ -200,7 +222,8 @@ void piSerialMonitorStatus(){
   for (int i = 0; i < 6; i++){
     result += "S0" + String(i) + "D" + intToString(sAngle[i]);
   }
-  result += "C0" + String(Conveyor[0]) + "C1" + String(Conveyor[1]);
+  result += "C0M" + String(Conveyor[0]) + "S" + intToString(ConveyorSpeed[0]);
+  result += "C1M" + String(Conveyor[1]) + "S" + intToString(ConveyorSpeed[1]);
   Serial.println(result);
 }
 
@@ -376,16 +399,31 @@ void InstructionHandle(String instruction) {
     grip(false);
     Serial.println("[Instruction] Open");
   }
-  else if (instruction.startsWith("COV")){
-    int num = instruction.substring(3, 4).toInt();
-    int way = instruction.substring(4, 5).toInt();
-
-    conveyor(num, way);
-    Serial.println("[Instruction] Conveyor Belt " + String(num) + " is now " + String(way));
+  else if (instruction.startsWith("C")){
+    // C0M0S000
+    int num = instruction.substring(1, 2).toInt();
+    int way = instruction.substring(3, 4).toInt();
+    // If no S value is specified, it will use current speed
+    if (instruction.length() == 4){
+      int speed = ConveyorSpeed[num];
+      conveyor(num, way, speed);
+      Serial.println("[Instruction] Conveyor " + String(num) + " at Mode " + String(way) + " with same speed " + String(speed));
+    }
+    else{
+      int speed = instruction.substring(5, 8).toInt();
+      conveyor(num, way, speed);
+      Serial.println("[Instruction] Conveyor " + String(num) + " at Mode " + String(way) + " with speed " + String(speed));
+    }
     
   }
   else if (instruction.startsWith("END")) {
     Serial.println("[Instruction] End of instruction");
+  }
+  else if (instruction.startsWith("T")){
+    // Set timePerMove and stepPerMove (format T000M000)
+    timePerMove = instruction.substring(1, 4).toInt();
+    stepPerMove = instruction.substring(5, 8).toInt();
+    Serial.println("[Instruction] Set timePerMove to " + String(timePerMove) + "ms and stepPerMove to " + String(stepPerMove));
   }
   else {
     Serial.println("[Instruction] Invalid instruction " + instruction);
@@ -393,7 +431,7 @@ void InstructionHandle(String instruction) {
 }
 
 
-void conveyor(int num, int way){
+void conveyor(int num, int way, int speed){
   if (num == 0){
     if (way == 0){
       digitalWrite(CONV_SA, LOW);
@@ -428,6 +466,16 @@ void conveyor(int num, int way){
       Conveyor[1] = 2;
     }
   }
+  // Speed
+  if (num == 0){
+    analogWrite(CONV_SS, speed);
+    ConveyorSpeed[0] = speed;
+  }
+  else if (num == 1){
+    analogWrite(CONV_LS, speed);
+    ConveyorSpeed[1] = speed;
+  }
+
 }
 
 void Instruction(String instructions) {
